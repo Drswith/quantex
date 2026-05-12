@@ -1,0 +1,55 @@
+{
+  "name": "quantex",
+  "version": "0.17.0",
+  "description": "Alias package for quantex-cli",
+  "keywords": [
+    "quantex",
+    "quantex-cli",
+    "cli",
+    "ai",
+    "agent"
+  ],
+  "license": "Apache-2.0",
+  "author": "Drswith <drswith@outlook.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Drswith/quantex.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Drswith/quantex/issues"
+  },
+  "homepage": "https://github.com/Drswith/quantex#readme",
+  "bin": {
+    "qtx": "./cli.mjs",
+    "quantex": "./cli.mjs"
+  },
+  "files": [
+    "index.d.mts",
+    "index.mjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./index.mjs",
+  "module": "./index.mjs",
+  "types": "./index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./index.d.mts",
+      "default": "./index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "check": "node --check cli.mjs && node --check index.mjs && node --input-type=module -e \"import('./index.mjs')\"",
+    "test": "bun run check"
+  },
+  "dependencies": {
+    "quantex-cli": "0.17.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "bun@1.3.11"
+}
