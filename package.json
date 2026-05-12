@@ -20,8 +20,8 @@
   },
   "homepage": "https://github.com/Drswith/quantex#readme",
   "bin": {
-    "qtx": "./cli.mjs",
-    "quantex": "./cli.mjs"
+    "qtx": "cli.mjs",
+    "quantex": "cli.mjs"
   },
   "files": [
     "index.d.mts",
