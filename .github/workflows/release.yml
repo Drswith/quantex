@@ -112,8 +112,25 @@ jobs:
           if npm view "quantex@$VERSION" version >/dev/null 2>&1; then
             echo "quantex@$VERSION is already published"
           else
-            npm publish --provenance --access public --tag "$NPM_TAG"
+            for attempt in 1 2 3 4 5; do
+              if npm publish --provenance --access public --tag "$NPM_TAG"; then
+                break
+              fi
+
+              if npm view "quantex@$VERSION" version >/dev/null 2>&1; then
+                echo "quantex@$VERSION became visible after publish failure"
+                break
+              fi
+
+              if [ "$attempt" = "5" ]; then
+                exit 1
+              fi
+
+              sleep "$((attempt * 20))"
+            done
           fi
+
+          npm dist-tag add "quantex@$VERSION" "$NPM_TAG"
       - name: Create GitHub release
         env:
           TAG: ${{ steps.meta.outputs.tag }}
