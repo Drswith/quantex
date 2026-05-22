@@ -111,7 +111,9 @@ jobs:
         run: |
           if npm view "quantex@$VERSION" version >/dev/null 2>&1; then
             echo "quantex@$VERSION is already published"
+            VERSION_ALREADY_PUBLISHED=1
           else
+            VERSION_ALREADY_PUBLISHED=0
             for attempt in 1 2 3 4 5; do
               if npm publish --provenance --access public --tag "$NPM_TAG"; then
                 break
@@ -130,7 +132,13 @@ jobs:
             done
           fi
 
-          npm dist-tag add "quantex@$VERSION" "$NPM_TAG"
+          CURRENT_TAG="$(npm view "quantex@${NPM_TAG}" version 2>/dev/null || true)"
+          if [ "$CURRENT_TAG" != "$VERSION" ]; then
+            echo "::warning::npm dist-tag '$NPM_TAG' currently points to '${CURRENT_TAG:-<missing>}' instead of '$VERSION'"
+            if [ "$VERSION_ALREADY_PUBLISHED" = "1" ]; then
+              echo "::warning::Trusted publishing cannot correct dist-tags for already-published versions; run 'npm dist-tag add quantex@$VERSION $NPM_TAG' with an npm token if needed."
+            fi
+          fi
       - name: Create GitHub release
         env:
           TAG: ${{ steps.meta.outputs.tag }}
