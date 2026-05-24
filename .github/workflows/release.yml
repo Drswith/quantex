@@ -63,7 +63,14 @@ jobs:
           if [ -z "$NPM_TAG" ]; then
             case "$VERSION" in
               *-*) NPM_TAG=next ;;
-              *) NPM_TAG=latest ;;
+              *)
+                CLI_LATEST="$(npm view quantex-cli@latest version --registry https://registry.npmjs.org)"
+                if [ "$VERSION" = "$CLI_LATEST" ]; then
+                  NPM_TAG=latest
+                else
+                  NPM_TAG=backfill
+                fi
+                ;;
             esac
           fi
 
