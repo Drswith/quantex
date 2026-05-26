@@ -19,13 +19,13 @@ jobs:
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.11
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
@@ -34,6 +34,7 @@ jobs:
         id: meta
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
+          PACKAGE_NAME="$(node -p "require('./package.json').name")"
 
           if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$'; then
             echo "Invalid version: $VERSION" >&2
@@ -42,12 +43,21 @@ jobs:
 
           case "$VERSION" in
             *-*) NPM_TAG=next ;;
-            *) NPM_TAG=latest ;;
+            *)
+              CURRENT_LATEST="$(npm view "${PACKAGE_NAME}@latest" version 2>/dev/null || true)"
+              if [ -n "$CURRENT_LATEST" ] && node -e 'const [target,current]=process.argv.slice(1); const parse=(version)=>{const match=version.split("+",1)[0].match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/); if(!match) process.exit(1); return [Number(match[1]),Number(match[2]),Number(match[3])];}; const left=parse(target); const right=parse(current); for (let index=0; index<3; index+=1) { if (left[index] !== right[index]) process.exit(left[index] < right[index] ? 0 : 1); } process.exit(1);' "$VERSION" "$CURRENT_LATEST"
+              then
+                NPM_TAG=backfill
+              else
+                NPM_TAG=latest
+              fi
+              ;;
           esac
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
           echo "npm-tag=$NPM_TAG" >> "$GITHUB_OUTPUT"
+          echo "package-name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
 
       - run: bun install --frozen-lockfile
       - run: bun run check
@@ -56,9 +66,10 @@ jobs:
         env:
           VERSION: ${{ steps.meta.outputs.version }}
           NPM_TAG: ${{ steps.meta.outputs.npm-tag }}
+          PACKAGE_NAME: ${{ steps.meta.outputs.package-name }}
         run: |
-          if npm view "quantex@$VERSION" version >/dev/null 2>&1; then
-            echo "quantex@$VERSION is already published"
+          if npm view "$PACKAGE_NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "$PACKAGE_NAME@$VERSION is already published"
             VERSION_ALREADY_PUBLISHED=1
           else
             VERSION_ALREADY_PUBLISHED=0
@@ -67,8 +78,8 @@ jobs:
                 break
               fi
 
-              if npm view "quantex@$VERSION" version >/dev/null 2>&1; then
-                echo "quantex@$VERSION became visible after publish failure"
+              if npm view "$PACKAGE_NAME@$VERSION" version >/dev/null 2>&1; then
+                echo "$PACKAGE_NAME@$VERSION became visible after publish failure"
                 break
               fi
 
@@ -80,11 +91,11 @@ jobs:
             done
           fi
 
-          CURRENT_TAG="$(npm view "quantex@${NPM_TAG}" version 2>/dev/null || true)"
+          CURRENT_TAG="$(npm view "${PACKAGE_NAME}@${NPM_TAG}" version 2>/dev/null || true)"
           if [ "$CURRENT_TAG" != "$VERSION" ]; then
             echo "::warning::npm dist-tag '$NPM_TAG' currently points to '${CURRENT_TAG:-<missing>}' instead of '$VERSION'"
             if [ "$VERSION_ALREADY_PUBLISHED" = "1" ]; then
-              echo "::warning::Trusted publishing cannot correct dist-tags for already-published versions; run 'npm dist-tag add quantex@$VERSION $NPM_TAG' with an npm token if needed."
+              echo "::warning::Trusted publishing cannot correct dist-tags for already-published versions; run 'npm dist-tag add $PACKAGE_NAME@$VERSION $NPM_TAG' with an npm token if needed."
             fi
           fi
       - name: Create GitHub release

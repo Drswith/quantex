@@ -42,6 +42,9 @@
     "./package.json": "./package.json"
   },
   "scripts": {
+    "automation:sync": "node scripts/sync-versions.mjs",
+    "automation:sync:plan": "node scripts/sync-versions.mjs --plan",
+    "automation:sync:self-test": "node scripts/sync-versions.mjs --self-test",
     "check": "node --check cli.mjs && node --check index.mjs && node --input-type=module -e \"import('./index.mjs')\"",
     "test": "bun run check"
   },
