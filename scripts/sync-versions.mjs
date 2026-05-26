@@ -612,6 +612,7 @@ function commitAndOpenPullRequest(version, branchName, config) {
 
 function removeStaleCleanDetachedWorktrees(mainCommit, config) {
   const output = run("git", ["worktree", "list", "--porcelain"]).stdout;
+  const currentWorktree = path.resolve(run("git", ["rev-parse", "--show-toplevel"]).stdout.trim());
   const worktrees = [];
   let current = {};
 
@@ -632,16 +633,32 @@ function removeStaleCleanDetachedWorktrees(mainCommit, config) {
   }
 
   for (const worktree of worktrees) {
+    const worktreePath = worktree.path ? path.resolve(worktree.path) : null;
     if (
       worktree.detached &&
       worktree.head === mainCommit &&
-      worktree.path &&
-      path.resolve(worktree.path).startsWith(config.worktreeRoot)
+      worktreePath &&
+      worktreePath !== currentWorktree &&
+      worktreePath.startsWith(config.worktreeRoot)
     ) {
-      const status = run("git", ["-C", worktree.path, "status", "--short"]).stdout.trim();
+      const statusResult = run("git", ["-C", worktreePath, "status", "--short"], { allowFailure: true });
+      if (statusResult.status !== 0) {
+        console.warn(`Skipped stale worktree cleanup for unreadable path: ${worktreePath}`);
+        continue;
+      }
+
+      const status = statusResult.stdout.trim();
       if (!status) {
-        run("git", ["worktree", "remove", worktree.path]);
-        console.log(`Removed stale detached automation worktree: ${worktree.path}`);
+        const removeResult = run("git", ["worktree", "remove", worktreePath], { allowFailure: true });
+        if (removeResult.status === 0) {
+          console.log(`Removed stale detached automation worktree: ${worktreePath}`);
+        } else {
+          const output = [removeResult.stderr, removeResult.stdout]
+            .map((value) => value?.trim())
+            .filter(Boolean)
+            .join("\n");
+          console.warn(`Skipped stale worktree cleanup for ${worktreePath}: ${output}`);
+        }
       }
     }
   }
