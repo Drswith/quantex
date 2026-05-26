@@ -43,20 +43,8 @@ export * from 'quantex-cli'
 
 ## Versioning
 
-`quantex` versions track the corresponding `quantex-cli` versions, and `dependencies.quantex-cli` is pinned to the exact same version.
+`quantex` releases are updated intentionally in this repository. When a release mirrors a `quantex-cli` version, keep `package.json` version and `dependencies.quantex-cli` pinned to the exact same version.
 
-## Release Sync
+## Release
 
-`quantex-cli` is the source package. After publishing a `quantex-cli` version, trigger this repository with a `repository_dispatch` event.
-
-```json
-{
-  "event_type": "sync-quantex-cli-release",
-  "client_payload": {
-    "version": "0.18.0",
-    "npm_tag": "latest"
-  }
-}
-```
-
-The `release.yml` workflow updates this package to the same version, updates `bun.lock`, commits the sync, creates `v<version>`, publishes `quantex`, and creates the GitHub release.
+Releases are driven only by tags in this repository. Update `package.json` and `bun.lock` intentionally, create a matching `v<version>` tag, and push the tag to publish `quantex` and create the GitHub release.
