@@ -8,7 +8,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 
@@ -80,59 +80,12 @@ function run(command, args = [], options = {}) {
   };
 }
 
-function configuredProxyEnv() {
-  const proxyUrl = process.env.QUANTEX_SYNC_PROXY_URL;
-  const httpsProxy = process.env.QUANTEX_SYNC_HTTPS_PROXY ?? process.env.HTTPS_PROXY ?? process.env.https_proxy;
-  const httpProxy = process.env.QUANTEX_SYNC_HTTP_PROXY ?? process.env.HTTP_PROXY ?? process.env.http_proxy;
-  const allProxy = process.env.QUANTEX_SYNC_ALL_PROXY ?? process.env.ALL_PROXY ?? process.env.all_proxy;
-
-  if (!proxyUrl && !httpsProxy && !httpProxy && !allProxy) {
-    return null;
-  }
-
-  return {
-    ...(proxyUrl ? { https_proxy: proxyUrl, http_proxy: proxyUrl, all_proxy: proxyUrl } : {}),
-    ...(httpsProxy ? { https_proxy: httpsProxy } : {}),
-    ...(httpProxy ? { http_proxy: httpProxy } : {}),
-    ...(allProxy ? { all_proxy: allProxy } : {}),
-  };
-}
-
-function runWithNetworkRetry(command, args = [], options = {}) {
-  const first = run(command, args, { ...options, allowFailure: true });
-  if (first.status === 0) {
-    return first;
-  }
-
-  const proxyEnv = configuredProxyEnv();
-  if (!proxyEnv) {
-    const invocation = [command, ...args].join(" ");
-    const output = [first.stderr, first.stdout]
-      .map((value) => value?.trim())
-      .filter(Boolean)
-      .join("\n");
-    throw new Error(`Command failed: ${invocation}${output ? `\n${output}` : ""}`);
-  }
-
-  const second = run(command, args, {
-    ...options,
-    allowFailure: true,
-    env: { ...(options.env ?? {}), ...proxyEnv },
-  });
-  if (second.status === 0) {
-    return second;
-  }
-
-  const invocation = [command, ...args].join(" ");
-  const output = [first.stderr, first.stdout, second.stderr, second.stdout]
-    .map((value) => value?.trim())
-    .filter(Boolean)
-    .join("\n");
-  throw new Error(`Command failed after proxy retry: ${invocation}${output ? `\n${output}` : ""}`);
+function versionSyncSettings(packageJson) {
+  return packageJson.versionSync ?? {};
 }
 
 function jsonFromCommand(command, args = [], options = {}) {
-  const result = runWithNetworkRetry(command, args, options);
+  const result = run(command, args, options);
   return JSON.parse(result.stdout);
 }
 
@@ -170,11 +123,7 @@ function lockfileForPackageManager(packageManager) {
 
 function inferUpstreamPackage(packageJson, aliasPackage) {
   const dependencies = packageJson.dependencies ?? {};
-  const configured =
-    packageJson.versionSync?.upstreamPackage ??
-    packageJson.automation?.versionSync?.upstreamPackage ??
-    process.env.QUANTEX_SYNC_UPSTREAM_PACKAGE ??
-    cliValue("upstream");
+  const configured = versionSyncSettings(packageJson).upstreamPackage ?? cliValue("upstream");
 
   if (configured) {
     return configured;
@@ -191,7 +140,7 @@ function inferUpstreamPackage(packageJson, aliasPackage) {
   }
 
   throw new Error(
-    "Could not infer upstream package. Set QUANTEX_SYNC_UPSTREAM_PACKAGE or package.json versionSync.upstreamPackage.",
+    "Could not infer upstream package. Set package.json versionSync.upstreamPackage or pass --upstream.",
   );
 }
 
@@ -205,19 +154,44 @@ function parseGitHubSlug(repository) {
   return match?.[1] ?? null;
 }
 
-function repoInfo() {
-  return jsonFromCommand("gh", ["repo", "view", "--json", "nameWithOwner,defaultBranchRef"]);
+function remoteRepoSlug() {
+  const url = run("git", ["remote", "get-url", "origin"]).stdout.trim();
+  const match = url.match(/github\.com[:/]([^/\s]+\/[^/\s.#]+?)(?:\.git)?$/);
+  return match?.[1] ?? null;
 }
 
-function readNpmRegistry() {
+function resolveBaseBranch(syncSettings) {
+  const fromCli = cliValue("base");
+  if (fromCli) {
+    return fromCli;
+  }
+
+  if (syncSettings.baseBranch) {
+    return syncSettings.baseBranch;
+  }
+
+  const originHead = run("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], { allowFailure: true });
+  if (originHead.status === 0) {
+    return originHead.stdout.trim().replace(/^refs\/remotes\/origin\//, "");
+  }
+
+  return "main";
+}
+
+function readNpmRegistry(packageJson) {
   const fromCli = cliValue("registry");
   if (fromCli) {
     return fromCli;
   }
 
-  const fromEnv = process.env.QUANTEX_SYNC_REGISTRY ?? process.env.npm_config_registry;
-  if (fromEnv) {
-    return fromEnv;
+  const fromSettings = versionSyncSettings(packageJson).registry;
+  if (fromSettings) {
+    return fromSettings;
+  }
+
+  const fromNpmConfig = process.env.npm_config_registry;
+  if (fromNpmConfig) {
+    return fromNpmConfig;
   }
 
   if (!existsSync(".npmrc")) {
@@ -234,20 +208,6 @@ function readNpmRegistry() {
   return DEFAULT_REGISTRY;
 }
 
-function ensureTrailingSeparator(value) {
-  return value.endsWith(path.sep) ? value : `${value}${path.sep}`;
-}
-
-function automationWorktreeRoot() {
-  const configured = cliValue("worktree-root") ?? process.env.QUANTEX_SYNC_WORKTREE_ROOT;
-  if (configured) {
-    return ensureTrailingSeparator(path.resolve(configured));
-  }
-
-  const codexHome = process.env.CODEX_HOME ?? path.join(homedir(), ".codex");
-  return ensureTrailingSeparator(path.join(codexHome, "worktrees"));
-}
-
 function splitList(value) {
   if (Array.isArray(value)) {
     return value;
@@ -262,11 +222,7 @@ function splitList(value) {
 }
 
 function configuredSkipVersions(packageJson) {
-  const values = [
-    ...splitList(packageJson.versionSync?.skipVersions),
-    ...splitList(packageJson.automation?.versionSync?.skipVersions),
-    ...splitList(process.env.QUANTEX_SYNC_SKIP_VERSIONS),
-  ];
+  const values = [...splitList(versionSyncSettings(packageJson).skipVersions)];
 
   for (const version of values) {
     parseSemver(version);
@@ -277,10 +233,7 @@ function configuredSkipVersions(packageJson) {
 
 function configuredMinimumUpstreamVersion(packageJson) {
   const value =
-    cliValue("minimum-upstream-version") ??
-    process.env.QUANTEX_SYNC_MINIMUM_UPSTREAM_VERSION ??
-    packageJson.versionSync?.minimumUpstreamVersion ??
-    packageJson.automation?.versionSync?.minimumUpstreamVersion;
+    cliValue("minimum-upstream-version") ?? versionSyncSettings(packageJson).minimumUpstreamVersion;
 
   if (!value) {
     return null;
@@ -292,17 +245,13 @@ function configuredMinimumUpstreamVersion(packageJson) {
 
 function buildConfig() {
   const packageJson = readPackageJson();
-  const repo = repoInfo();
-  const aliasPackage = cliValue("package") ?? process.env.QUANTEX_SYNC_PACKAGE ?? packageJson.name;
+  const syncSettings = versionSyncSettings(packageJson);
+  const aliasPackage = cliValue("package") ?? packageJson.name;
   const upstreamPackage = inferUpstreamPackage(packageJson, aliasPackage);
-  const defaultBranch = repo.defaultBranchRef?.name;
-  const baseBranch = cliValue("base") ?? process.env.QUANTEX_SYNC_BASE_BRANCH ?? defaultBranch;
+  const baseBranch = resolveBaseBranch(syncSettings);
 
   if (!aliasPackage) {
     throw new Error("Could not resolve alias package name from package.json.");
-  }
-  if (!baseBranch) {
-    throw new Error("Could not resolve base branch from GitHub metadata.");
   }
 
   const packageManager = packageManagerName(packageJson);
@@ -311,20 +260,13 @@ function buildConfig() {
     aliasPackage,
     upstreamPackage,
     baseBranch,
-    branchPrefix:
-      cliValue("branch-prefix") ??
-      process.env.QUANTEX_SYNC_BRANCH_PREFIX ??
-      `codex/sync-${aliasPackage}-v`,
-    registry: readNpmRegistry(),
+    registry: readNpmRegistry(packageJson),
     releaseWorkflow:
-      cliValue("release-workflow") ??
-      process.env.QUANTEX_SYNC_RELEASE_WORKFLOW ??
-      DEFAULT_RELEASE_WORKFLOW,
+      cliValue("release-workflow") ?? syncSettings.releaseWorkflow ?? DEFAULT_RELEASE_WORKFLOW,
     expectedRepo: parseGitHubSlug(packageJson.repository),
-    repoSlug: repo.nameWithOwner,
+    repoSlug: remoteRepoSlug(),
     packageManager,
     lockfile: lockfileForPackageManager(packageManager),
-    worktreeRoot: automationWorktreeRoot(),
     skipVersions: configuredSkipVersions(packageJson),
     minimumUpstreamVersion: configuredMinimumUpstreamVersion(packageJson),
   };
@@ -481,16 +423,6 @@ function assertCleanWorktree() {
   }
 }
 
-function remoteSyncBranchVersion(branchName) {
-  const ref = `origin/${branchName}`;
-  const result = run("git", ["show", `${ref}:package.json`], { allowFailure: true });
-  if (result.status !== 0) {
-    return null;
-  }
-
-  return JSON.parse(result.stdout).version;
-}
-
 function ensureTagForMain(version, mainCommit, config) {
   const tag = `v${version}`;
   const remoteTag = run("git", ["ls-remote", "--exit-code", "--tags", "origin", `refs/tags/${tag}`], {
@@ -518,7 +450,7 @@ function ensureTagForMain(version, mainCommit, config) {
     run("git", ["tag", tag, mainCommit]);
   }
 
-  runWithNetworkRetry("git", ["push", "origin", `refs/tags/${tag}`]);
+  run("git", ["push", "origin", `refs/tags/${tag}`]);
   console.log(`Pushed ${tag} on origin/${config.baseBranch}; release workflow will publish ${config.aliasPackage}@${version}.`);
 }
 
@@ -586,68 +518,18 @@ function validateChanges(config) {
   parseReleaseWorkflow(config);
 }
 
-function commitAndPushSyncBranch(version, branchName, config) {
-  const title = `chore: sync ${config.aliasPackage} alias to ${version}`;
-
-  run("git", ["add", "package.json", config.lockfile]);
-  run("git", ["commit", "-m", title]);
-  runWithNetworkRetry("git", ["push", "--force-with-lease", "origin", `HEAD:refs/heads/${branchName}`]);
-  run("git", ["switch", "--detach", `origin/${config.baseBranch}`]);
-  console.log(`Pushed sync branch origin/${branchName} for ${config.aliasPackage}@${version}.`);
-}
-
-function removeStaleCleanDetachedWorktrees(mainCommit, config) {
-  const output = run("git", ["worktree", "list", "--porcelain"]).stdout;
-  const currentWorktree = path.resolve(run("git", ["rev-parse", "--show-toplevel"]).stdout.trim());
-  const worktrees = [];
-  let current = {};
-
-  for (const line of output.split("\n")) {
-    if (line.startsWith("worktree ")) {
-      if (current.path) {
-        worktrees.push(current);
-      }
-      current = { path: line.slice("worktree ".length) };
-    } else if (line.startsWith("HEAD ")) {
-      current.head = line.slice("HEAD ".length);
-    } else if (line === "detached") {
-      current.detached = true;
-    }
-  }
-  if (current.path) {
-    worktrees.push(current);
-  }
-
-  for (const worktree of worktrees) {
-    const worktreePath = worktree.path ? path.resolve(worktree.path) : null;
-    if (
-      worktree.detached &&
-      worktree.head === mainCommit &&
-      worktreePath &&
-      worktreePath !== currentWorktree &&
-      worktreePath.startsWith(config.worktreeRoot)
-    ) {
-      const statusResult = run("git", ["-C", worktreePath, "status", "--short"], { allowFailure: true });
-      if (statusResult.status !== 0) {
-        console.warn(`Skipped stale worktree cleanup for unreadable path: ${worktreePath}`);
-        continue;
-      }
-
-      const status = statusResult.stdout.trim();
-      if (!status) {
-        const removeResult = run("git", ["worktree", "remove", worktreePath], { allowFailure: true });
-        if (removeResult.status === 0) {
-          console.log(`Removed stale detached automation worktree: ${worktreePath}`);
-        } else {
-          const output = [removeResult.stderr, removeResult.stdout]
-            .map((value) => value?.trim())
-            .filter(Boolean)
-            .join("\n");
-          console.warn(`Skipped stale worktree cleanup for ${worktreePath}: ${output}`);
-        }
-      }
-    }
-  }
+function applyVersionSync(version, config) {
+  rewritePackageJson(version, config);
+  validateChanges(config);
+  ensureOnlyExpectedFilesChanged(config);
+  console.log(
+    [
+      `Updated ${config.aliasPackage} to ${version} (${config.lockfile} refreshed).`,
+      "Review the diff, then commit and push:",
+      `  git add package.json ${config.lockfile}`,
+      `  git commit -m "chore: sync ${config.aliasPackage} alias to ${version}"`,
+    ].join("\n"),
+  );
 }
 
 function selectNextVersion(upstreamMetadata, aliasMetadata, mainVersion, config) {
@@ -691,6 +573,10 @@ function assertExpectedRepo(config) {
     return;
   }
 
+  if (!config.repoSlug) {
+    throw new Error("Could not resolve GitHub slug from origin remote.");
+  }
+
   if (config.repoSlug !== config.expectedRepo) {
     throw new Error(`Refusing to sync ${config.expectedRepo} from ${config.repoSlug}.`);
   }
@@ -702,7 +588,6 @@ function reportPlanConfig(config) {
       `Package: ${config.aliasPackage}`,
       `Upstream: ${config.upstreamPackage}`,
       `Base: origin/${config.baseBranch}`,
-      `Branch prefix: ${config.branchPrefix}`,
       `Registry: ${config.registry}`,
       ...(config.minimumUpstreamVersion ? [`Minimum upstream version: ${config.minimumUpstreamVersion}`] : []),
     ].join("\n"),
@@ -752,7 +637,6 @@ function main() {
       return;
     }
     ensureTagForMain(mainVersion, mainCommit, config);
-    removeStaleCleanDetachedWorktrees(mainCommit, config);
     return;
   }
 
@@ -783,34 +667,16 @@ function main() {
 
   if (!nextVersion) {
     console.log(`${config.aliasPackage} is caught up through ${upstreamLatest}.`);
-    removeStaleCleanDetachedWorktrees(mainCommit, config);
-    return;
-  }
-
-  const branchName = `${config.branchPrefix}${nextVersion}`;
-  const remoteVersion = remoteSyncBranchVersion(branchName);
-  if (remoteVersion === nextVersion) {
-    if (planOnly) {
-      console.log(`Sync branch origin/${branchName} already at ${nextVersion}.`);
-      return;
-    }
-    console.log(`Sync branch origin/${branchName} already at ${nextVersion}; nothing to do.`);
-    removeStaleCleanDetachedWorktrees(mainCommit, config);
     return;
   }
 
   if (planOnly) {
-    console.log(`Would push ${branchName} to sync ${config.aliasPackage}@${nextVersion}.`);
+    console.log(`Would update package.json and ${config.lockfile} to ${nextVersion}.`);
     return;
   }
 
   assertCleanWorktree();
-  run("git", ["switch", "--detach", mainRef]);
-  rewritePackageJson(nextVersion, config);
-  validateChanges(config);
-  ensureOnlyExpectedFilesChanged(config);
-  commitAndPushSyncBranch(nextVersion, branchName, config);
-  removeStaleCleanDetachedWorktrees(mainCommit, config);
+  applyVersionSync(nextVersion, config);
 }
 
 try {
