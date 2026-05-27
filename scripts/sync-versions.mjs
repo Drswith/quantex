@@ -247,6 +247,33 @@ function automationWorktreeRoot() {
   return ensureTrailingSeparator(path.join(codexHome, "worktrees"));
 }
 
+function splitList(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function configuredSkipVersions(packageJson) {
+  const values = [
+    ...splitList(packageJson.versionSync?.skipVersions),
+    ...splitList(packageJson.automation?.versionSync?.skipVersions),
+    ...splitList(process.env.QUANTEX_SYNC_SKIP_VERSIONS),
+  ];
+
+  for (const version of values) {
+    parseSemver(version);
+  }
+
+  return new Set(values);
+}
+
 function buildConfig() {
   const packageJson = readPackageJson();
   const repo = repoInfo();
@@ -282,6 +309,7 @@ function buildConfig() {
     packageManager,
     lockfile: lockfileForPackageManager(packageManager),
     worktreeRoot: automationWorktreeRoot(),
+    skipVersions: configuredSkipVersions(packageJson),
   };
 }
 
@@ -676,11 +704,16 @@ function selectNextVersion(upstreamMetadata, aliasMetadata, mainVersion, config)
   const candidates = sortedVersions(upstreamVersions)
     .filter((version) => isLessOrEqual(version, upstreamLatest))
     .filter((version) => isGreater(version, mainVersion))
+    .filter((version) => !config.skipVersions.has(version))
     .filter((version) => !aliasVersions.has(version));
 
   return {
     nextVersion: candidates[0] ?? null,
     upstreamLatest,
+    skippedConfigured: sortedVersions(upstreamVersions)
+      .filter((version) => isLessOrEqual(version, upstreamLatest))
+      .filter((version) => isGreater(version, mainVersion))
+      .filter((version) => config.skipVersions.has(version)),
     skippedAlreadyPublished: sortedVersions(upstreamVersions)
       .filter((version) => isLessOrEqual(version, upstreamLatest))
       .filter((version) => isGreater(version, mainVersion))
@@ -762,7 +795,7 @@ function main() {
     return;
   }
 
-  const { nextVersion, upstreamLatest, skippedAlreadyPublished } = selectNextVersion(
+  const { nextVersion, upstreamLatest, skippedAlreadyPublished, skippedConfigured } = selectNextVersion(
     upstreamMetadata,
     aliasMetadata,
     mainVersion,
@@ -775,6 +808,10 @@ function main() {
     console.log(
       `Skipping already published ${config.aliasPackage} versions ahead of ${mainRef}: ${skippedAlreadyPublished.join(", ")}`,
     );
+  }
+
+  if (skippedConfigured.length > 0) {
+    console.log(`Skipping configured ${config.upstreamPackage} versions: ${skippedConfigured.join(", ")}`);
   }
 
   if (!nextVersion) {
