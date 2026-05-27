@@ -1,6 +1,6 @@
 {
   "name": "quantex",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "Alias package for quantex-cli",
   "keywords": [
     "quantex",
@@ -52,7 +52,7 @@
     "minimumUpstreamVersion": "0.12.1"
   },
   "dependencies": {
-    "quantex-cli": "0.13.0"
+    "quantex-cli": "0.14.0"
   },
   "engines": {
     "node": ">=20"
