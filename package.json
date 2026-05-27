@@ -49,9 +49,7 @@
     "test": "bun run check"
   },
   "versionSync": {
-    "skipVersions": [
-      "0.1.0-beta.1"
-    ]
+    "minimumUpstreamVersion": "0.12.1"
   },
   "dependencies": {
     "quantex-cli": "0.0.2-beta.1"

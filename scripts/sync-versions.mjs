@@ -274,6 +274,21 @@ function configuredSkipVersions(packageJson) {
   return new Set(values);
 }
 
+function configuredMinimumUpstreamVersion(packageJson) {
+  const value =
+    cliValue("minimum-upstream-version") ??
+    process.env.QUANTEX_SYNC_MINIMUM_UPSTREAM_VERSION ??
+    packageJson.versionSync?.minimumUpstreamVersion ??
+    packageJson.automation?.versionSync?.minimumUpstreamVersion;
+
+  if (!value) {
+    return null;
+  }
+
+  parseSemver(value);
+  return value;
+}
+
 function buildConfig() {
   const packageJson = readPackageJson();
   const repo = repoInfo();
@@ -310,6 +325,7 @@ function buildConfig() {
     lockfile: lockfileForPackageManager(packageManager),
     worktreeRoot: automationWorktreeRoot(),
     skipVersions: configuredSkipVersions(packageJson),
+    minimumUpstreamVersion: configuredMinimumUpstreamVersion(packageJson),
   };
 }
 
@@ -701,23 +717,23 @@ function selectNextVersion(upstreamMetadata, aliasMetadata, mainVersion, config)
     throw new Error(`Could not resolve ${config.upstreamPackage} latest version from npm metadata.`);
   }
 
-  const candidates = sortedVersions(upstreamVersions)
+  const upstreamAhead = sortedVersions(upstreamVersions)
     .filter((version) => isLessOrEqual(version, upstreamLatest))
-    .filter((version) => isGreater(version, mainVersion))
+    .filter((version) => isGreater(version, mainVersion));
+  const minimumUpstreamVersion = config.minimumUpstreamVersion;
+  const isBelowMinimum = (version) =>
+    minimumUpstreamVersion ? compareSemver(version, minimumUpstreamVersion) < 0 : false;
+  const candidates = upstreamAhead
+    .filter((version) => !isBelowMinimum(version))
     .filter((version) => !config.skipVersions.has(version))
     .filter((version) => !aliasVersions.has(version));
 
   return {
     nextVersion: candidates[0] ?? null,
     upstreamLatest,
-    skippedConfigured: sortedVersions(upstreamVersions)
-      .filter((version) => isLessOrEqual(version, upstreamLatest))
-      .filter((version) => isGreater(version, mainVersion))
-      .filter((version) => config.skipVersions.has(version)),
-    skippedAlreadyPublished: sortedVersions(upstreamVersions)
-      .filter((version) => isLessOrEqual(version, upstreamLatest))
-      .filter((version) => isGreater(version, mainVersion))
-      .filter((version) => aliasVersions.has(version)),
+    skippedBelowMinimum: upstreamAhead.filter((version) => isBelowMinimum(version) && !aliasVersions.has(version)),
+    skippedConfigured: upstreamAhead.filter((version) => config.skipVersions.has(version)),
+    skippedAlreadyPublished: upstreamAhead.filter((version) => aliasVersions.has(version)),
   };
 }
 
@@ -744,6 +760,7 @@ function reportPlanConfig(config) {
       `Base: origin/${config.baseBranch}`,
       `Branch prefix: ${config.branchPrefix}`,
       `Registry: ${config.registry}`,
+      ...(config.minimumUpstreamVersion ? [`Minimum upstream version: ${config.minimumUpstreamVersion}`] : []),
     ].join("\n"),
   );
 }
@@ -795,7 +812,7 @@ function main() {
     return;
   }
 
-  const { nextVersion, upstreamLatest, skippedAlreadyPublished, skippedConfigured } = selectNextVersion(
+  const { nextVersion, upstreamLatest, skippedAlreadyPublished, skippedConfigured, skippedBelowMinimum } = selectNextVersion(
     upstreamMetadata,
     aliasMetadata,
     mainVersion,
@@ -807,6 +824,12 @@ function main() {
   if (skippedAlreadyPublished.length > 0) {
     console.log(
       `Skipping already published ${config.aliasPackage} versions ahead of ${mainRef}: ${skippedAlreadyPublished.join(", ")}`,
+    );
+  }
+
+  if (skippedBelowMinimum.length > 0) {
+    console.log(
+      `Skipping ${config.upstreamPackage} versions below minimum ${config.minimumUpstreamVersion}: ${skippedBelowMinimum.join(", ")}`,
     );
   }
 
