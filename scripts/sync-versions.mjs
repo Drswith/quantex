@@ -481,59 +481,14 @@ function assertCleanWorktree() {
   }
 }
 
-function openSyncPullRequest(branchName, config) {
-  const prs = jsonFromCommand("gh", [
-    "pr",
-    "list",
-    "--state",
-    "open",
-    "--base",
-    config.baseBranch,
-    "--head",
-    branchName,
-    "--json",
-    "number,title,url,headRefName,isDraft",
-  ]);
-  return prs[0] ?? null;
-}
-
-function validationItems(config) {
-  return [
-    `${config.packageManager} install`,
-    `${config.packageManager} run check`,
-    `${config.packageManager} pm pack --dry-run`,
-    "git diff --check",
-    "release workflow YAML parse",
-  ];
-}
-
-function bodyForVersion(version, config) {
-  return [
-    "## Summary",
-    `- sync \`${config.aliasPackage}\` package version to \`${version}\``,
-    `- pin \`${config.upstreamPackage}\` dependency to \`${version}\``,
-    `- refresh \`${config.lockfile}\``,
-    "",
-    "## Validation",
-    ...validationItems(config).map((item) => `- ${item}`),
-    "",
-  ].join("\n");
-}
-
-function writeBodyFile(version, config) {
-  const file = path.join(tmpdir(), `${config.aliasPackage}-sync-pr-${version}.md`);
-  const body = bodyForVersion(version, config);
-  writeFileSync(file, body, "utf8");
-  return file;
-}
-
-function repairPullRequestBody(prNumber, version, config) {
-  const body = run("gh", ["pr", "view", String(prNumber), "--json", "body", "--jq", ".body"]).stdout;
-  if (body.includes("\\n") || !body.includes("## Summary") || !body.includes("## Validation")) {
-    const bodyFile = writeBodyFile(version, config);
-    runWithNetworkRetry("gh", ["pr", "edit", String(prNumber), "--body-file", bodyFile]);
-    console.log(`Repaired PR body for #${prNumber}.`);
+function remoteSyncBranchVersion(branchName) {
+  const ref = `origin/${branchName}`;
+  const result = run("git", ["show", `${ref}:package.json`], { allowFailure: true });
+  if (result.status !== 0) {
+    return null;
   }
+
+  return JSON.parse(result.stdout).version;
 }
 
 function ensureTagForMain(version, mainCommit, config) {
@@ -631,36 +586,14 @@ function validateChanges(config) {
   parseReleaseWorkflow(config);
 }
 
-function commitAndOpenPullRequest(version, branchName, config) {
-  const bodyFile = writeBodyFile(version, config);
+function commitAndPushSyncBranch(version, branchName, config) {
   const title = `chore: sync ${config.aliasPackage} alias to ${version}`;
 
   run("git", ["add", "package.json", config.lockfile]);
   run("git", ["commit", "-m", title]);
   runWithNetworkRetry("git", ["push", "--force-with-lease", "origin", `HEAD:refs/heads/${branchName}`]);
-
-  const existing = openSyncPullRequest(branchName, config);
-  let pr = existing;
-  if (pr) {
-    runWithNetworkRetry("gh", ["pr", "edit", String(pr.number), "--title", title, "--body-file", bodyFile]);
-  } else {
-    const url = runWithNetworkRetry("gh", [
-      "pr",
-      "create",
-      "--base",
-      config.baseBranch,
-      "--head",
-      branchName,
-      "--title",
-      title,
-      "--body-file",
-      bodyFile,
-    ]).stdout.trim();
-    pr = { url };
-  }
-
   run("git", ["switch", "--detach", `origin/${config.baseBranch}`]);
-  console.log(`Opened version sync PR: ${pr.url}`);
+  console.log(`Pushed sync branch origin/${branchName} for ${config.aliasPackage}@${version}.`);
 }
 
 function removeStaleCleanDetachedWorktrees(mainCommit, config) {
@@ -855,20 +788,19 @@ function main() {
   }
 
   const branchName = `${config.branchPrefix}${nextVersion}`;
-  const existingPr = openSyncPullRequest(branchName, config);
-  if (existingPr) {
+  const remoteVersion = remoteSyncBranchVersion(branchName);
+  if (remoteVersion === nextVersion) {
     if (planOnly) {
-      console.log(`Would reuse existing version sync PR: ${existingPr.url}`);
+      console.log(`Sync branch origin/${branchName} already at ${nextVersion}.`);
       return;
     }
-    repairPullRequestBody(existingPr.number, nextVersion, config);
-    console.log(`Version sync PR already exists: ${existingPr.url}`);
+    console.log(`Sync branch origin/${branchName} already at ${nextVersion}; nothing to do.`);
     removeStaleCleanDetachedWorktrees(mainCommit, config);
     return;
   }
 
   if (planOnly) {
-    console.log(`Would open ${branchName} to sync ${config.aliasPackage}@${nextVersion}.`);
+    console.log(`Would push ${branchName} to sync ${config.aliasPackage}@${nextVersion}.`);
     return;
   }
 
@@ -877,7 +809,7 @@ function main() {
   rewritePackageJson(nextVersion, config);
   validateChanges(config);
   ensureOnlyExpectedFilesChanged(config);
-  commitAndOpenPullRequest(nextVersion, branchName, config);
+  commitAndPushSyncBranch(nextVersion, branchName, config);
   removeStaleCleanDetachedWorktrees(mainCommit, config);
 }
 
