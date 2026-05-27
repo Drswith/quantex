@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
+import { parse as parseYaml } from "yaml";
 
 const DEFAULT_REGISTRY = "https://registry.npmjs.org";
 const DEFAULT_RELEASE_WORKFLOW = ".github/workflows/release.yml";
@@ -605,7 +606,15 @@ function parseReleaseWorkflow(config) {
     return;
   }
 
-  run("ruby", ["-e", "require 'yaml'; YAML.load_file(ARGV.fetch(0))", config.releaseWorkflow]);
+  const source = readFileSync(config.releaseWorkflow, "utf8");
+  try {
+    parseYaml(source);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to parse release workflow YAML (${config.releaseWorkflow}): ${message}`, {
+      cause: error,
+    });
+  }
 }
 
 function validateChanges(config) {
@@ -739,7 +748,9 @@ function selectNextVersion(upstreamMetadata, aliasMetadata, mainVersion, config)
 
 function selfTest() {
   assertComparator();
+  parseReleaseWorkflow({ releaseWorkflow: DEFAULT_RELEASE_WORKFLOW });
   console.log("SemVer comparator self-test passed.");
+  console.log("Release workflow YAML parse self-test passed.");
 }
 
 function assertExpectedRepo(config) {
