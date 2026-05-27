@@ -582,6 +582,53 @@ function assertExpectedRepo(config) {
   }
 }
 
+function syncPullRequestTitle(version, config) {
+  return `chore: sync ${config.aliasPackage} alias to ${version}`;
+}
+
+function ghAvailable() {
+  return run("gh", ["--version"], { allowFailure: true }).status === 0;
+}
+
+function findOpenSyncPullRequests(version, config) {
+  if (!ghAvailable()) {
+    return null;
+  }
+
+  const title = syncPullRequestTitle(version, config);
+  const prs = jsonFromCommand("gh", [
+    "pr",
+    "list",
+    "--state",
+    "open",
+    "--base",
+    config.baseBranch,
+    "--json",
+    "number,title,url,headRefName",
+  ]);
+  return prs.filter((pr) => pr.title === title);
+}
+
+function reportExistingSyncPullRequests(version, config) {
+  const existing = findOpenSyncPullRequests(version, config);
+  if (existing === null) {
+    console.log("gh not available; check open sync PRs manually before creating one.");
+    return;
+  }
+
+  if (existing.length === 0) {
+    console.log(`No open PR titled "${syncPullRequestTitle(version, config)}".`);
+    return;
+  }
+
+  console.log(
+    [
+      `Open sync PR(s) for ${version} — reuse one; do not open another:`,
+      ...existing.map((pr) => `  #${pr.number} ${pr.url} (${pr.headRefName})`),
+    ].join("\n"),
+  );
+}
+
 function reportPlanConfig(config) {
   console.log(
     [
@@ -672,6 +719,7 @@ function main() {
 
   if (planOnly) {
     console.log(`Would update package.json and ${config.lockfile} to ${nextVersion}.`);
+    reportExistingSyncPullRequests(nextVersion, config);
     return;
   }
 
