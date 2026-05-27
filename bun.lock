@@ -5,7 +5,7 @@
     "": {
       "name": "quantex",
       "dependencies": {
-        "quantex-cli": "0.16.4",
+        "quantex-cli": "0.20.0",
       },
     },
   },
@@ -18,8 +18,10 @@
 
     "prompts": ["prompts@2.4.2", "https://registry.npmmirror.com/prompts/-/prompts-2.4.2.tgz", { "dependencies": { "kleur": "^3.0.3", "sisteransi": "^1.0.5" } }, "sha512-NxNv/kLguCA7p3jE8oL2aEBsrJWgAakBpgmgK6lpPWV+WuOmY6r2/zbAVnP+T8bQlA0nzHXSJSJW0Hq7ylaD2Q=="],
 
-    "quantex-cli": ["quantex-cli@0.16.4", "", { "dependencies": { "commander": "^14.0.3", "picocolors": "^1.1.1", "prompts": "^2.4.2" }, "bin": { "qtx": "dist/cli.mjs", "quantex": "dist/cli.mjs" } }, "sha512-tVLU2HjQXadstIT8RxAm6ANeq6k71lGC0VzcDLBxvkKw0cB4vZZja3v0l8X5TKN59rdUiFxWuijskThwD/x8Gg=="],
+    "quantex-cli": ["quantex-cli@0.20.0", "", { "dependencies": { "commander": "^14.0.3", "picocolors": "^1.1.1", "prompts": "^2.4.2", "zod": "^4.3.6" }, "bin": { "qtx": "dist/cli.mjs", "quantex": "dist/cli.mjs" } }, "sha512-Fx2fZCvCg7oyDqNbbo2gve7ySx8qy17ks1TOn4aofiRNeUE2BBiagnwYM/vggCsyu12vvZgwgy6+Oiykm6VXLA=="],
 
     "sisteransi": ["sisteransi@1.0.5", "https://registry.npmmirror.com/sisteransi/-/sisteransi-1.0.5.tgz", {}, "sha512-bLGGlR1QxBcynn2d5YmDX4MGjlZvy2MRBDRNHLJ8VI6l6+9FUiyTFNJ0IveOSP0bcXgVDPRcfGqA0pjaqUpfVg=="],
+
+    "zod": ["zod@4.4.3", "", {}, "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="],
   }
 }
