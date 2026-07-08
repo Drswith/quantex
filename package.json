@@ -1,6 +1,6 @@
 {
   "name": "quantex",
-  "version": "0.25.8",
+  "version": "0.25.9",
   "description": "Alias package for quantex-cli",
   "keywords": [
     "quantex",
@@ -46,7 +46,7 @@
     "test": "bun run check"
   },
   "dependencies": {
-    "quantex-cli": "0.25.8"
+    "quantex-cli": "0.25.9"
   },
   "engines": {
     "node": ">=20"
