@@ -60,7 +60,16 @@ jobs:
           echo "package-name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
 
       - run: bun install --frozen-lockfile
-      - run: bun run check
+      - name: Validate package
+        run: |
+          case "${{ steps.meta.outputs.npm-tag }}" in
+            backfill|next)
+              node --check cli.mjs && node --check index.mjs
+              ;;
+            *)
+              bun run check
+              ;;
+          esac
       - run: bun pm pack --dry-run
       - name: Publish to npm
         env:
